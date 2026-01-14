@@ -5,12 +5,12 @@ import pandas as pd
 import os
 
 # ---- NOTION SETUP ----
-# Get your Notion token and database ID from environment variables
+# Use environment variables or Streamlit Secrets
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("DATABASE_ID")
 
 if not NOTION_TOKEN or not DATABASE_ID:
-    st.error("Notion token or database ID is missing. Please set them as environment variables or Streamlit secrets.")
+    st.error("Notion token or database ID missing. Please set them as environment variables or in Streamlit secrets.")
     st.stop()
 
 notion = Client(auth=NOTION_TOKEN)
@@ -38,14 +38,16 @@ def fetch_posts():
             })
     except Exception as e:
         st.error(f"Error fetching data from Notion: {e}")
-    
+        return pd.DataFrame()
+
     df = pd.DataFrame(posts)
-    
+
     if not df.empty:
         df["Total Engagement"] = df["Likes"] + df["Comments"] + df["Shares"] + df["Saves"]
-        # Avoid division by zero
-        df["Engagement Rate"] = df.apply(lambda x: (x["Total Engagement"] / x["Reach"] * 100) if x["Reach"] else 0, axis=1)
-    
+        df["Engagement Rate"] = df.apply(
+            lambda x: (x["Total Engagement"] / x["Reach"] * 100) if x["Reach"] else 0, axis=1
+        )
+
     return df
 
 # ---- STREAMLIT APP ----
@@ -65,8 +67,7 @@ else:
     st.metric("Average Reach", int(df["Reach"].mean()))
     st.metric("Average Engagement Rate", f"{df['Engagement Rate'].mean():.2f}%")
 
-    # Optional: charts
-    st.markdown("### Engagement by Platform")
+    # Optional: bar chart for engagement by platform
+    st.markdown("### Total Engagement by Platform")
     platform_df = df.groupby("Platform")["Total Engagement"].sum().reset_index()
     st.bar_chart(platform_df.rename(columns={"Platform": "index"}).set_index("index"))
-
