@@ -4,12 +4,12 @@ from notion_client import Client
 import pandas as pd
 import os
 
-# ---- NOTION SETUP ----
+# ---- SETUP ----
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 PAGE_ID = os.getenv("NOTION_PAGE_ID")  # page containing inline database
 
 if not NOTION_TOKEN or not PAGE_ID:
-    st.error("Please set NOTION_TOKEN and NOTION_PAGE_ID in environment variables or Streamlit secrets.")
+    st.error("Set NOTION_TOKEN and NOTION_PAGE_ID in environment variables or Streamlit secrets.")
     st.stop()
 
 notion = Client(auth=NOTION_TOKEN)
@@ -18,28 +18,46 @@ notion = Client(auth=NOTION_TOKEN)
 def fetch_inline_database(page_id):
     posts = []
 
-    # Use the correct method in latest SDK
-    blocks = notion.blocks.children.list(block_id=page_id)  # block_id instead of page_id
-    for block in blocks["results"]:
-        if block["type"] == "child_database":
+    # Correct call for current SDK
+    try:
+        blocks = notion.blocks.children.list(block_id=page_id)
+    except Exception as e:
+        st.error(f"Error fetching page blocks: {e}")
+        return pd.DataFrame()
+
+    # Find first inline database
+    db_id = None
+    for block in blocks.get("results", []):
+        if block.get("type") == "child_database":
             db_id = block["id"]
-            rows = notion.databases.query(database_id=db_id)
-            for page in rows.get("results", []):
-                props = page["properties"]
-                posts.append({
-                    "Post title": props.get("Post title", {}).get("title", [{}])[0].get("text", {}).get("content", ""),
-                    "Platform": props.get("Platform", {}).get("select", {}).get("name", ""),
-                    "Post type": props.get("Post type", {}).get("select", {}).get("name", ""),
-                    "Content": props.get("Content", {}).get("select", {}).get("name", ""),
-                    "Date": props.get("Date", {}).get("date", {}).get("start", ""),
-                    "Reach": props.get("Reach", {}).get("number", 0),
-                    "Likes": props.get("Likes", {}).get("number", 0),
-                    "Comments": props.get("Comments", {}).get("number", 0),
-                    "Shares": props.get("Shares", {}).get("number", 0),
-                    "Saves": props.get("Saves", {}).get("number", 0),
-                    "Repost": props.get("Repost", {}).get("number", 0),
-                })
-            break  # only first inline database
+            break
+
+    if not db_id:
+        st.info("No inline database found on this page.")
+        return pd.DataFrame()
+
+    # Query database
+    try:
+        rows = notion.databases.query(database_id=db_id)
+    except Exception as e:
+        st.error(f"Error querying database: {e}")
+        return pd.DataFrame()
+
+    for page in rows.get("results", []):
+        props = page.get("properties", {})
+        posts.append({
+            "Post title": props.get("Post title", {}).get("title", [{}])[0].get("text", {}).get("content", ""),
+            "Platform": props.get("Platform", {}).get("select", {}).get("name", ""),
+            "Post type": props.get("Post type", {}).get("select", {}).get("name", ""),
+            "Content": props.get("Content", {}).get("select", {}).get("name", ""),
+            "Date": props.get("Date", {}).get("date", {}).get("start", ""),
+            "Reach": props.get("Reach", {}).get("number", 0),
+            "Likes": props.get("Likes", {}).get("number", 0),
+            "Comments": props.get("Comments", {}).get("number", 0),
+            "Shares": props.get("Shares", {}).get("number", 0),
+            "Saves": props.get("Saves", {}).get("number", 0),
+            "Repost": props.get("Repost", {}).get("number", 0),
+        })
 
     df = pd.DataFrame(posts)
     if not df.empty:
