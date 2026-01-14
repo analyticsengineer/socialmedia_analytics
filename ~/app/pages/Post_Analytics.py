@@ -1,81 +1,132 @@
-# Post_Analytics.py
 import streamlit as st
-from notion_client import Client
-import pandas as pd
+import requests
 import os
+from dotenv import load_dotenv
+from datetime import date
 
-# ---- SETUP ----
+# Load environment variables
+load_dotenv()
+
+# Notion setup
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-PAGE_ID = os.getenv("NOTION_PAGE_ID")  # page containing inline database
+NOTION_PAGE_ID = os.getenv("NOTION_PAGE_ID")  # Page containing your inline database
 
-if not NOTION_TOKEN or not PAGE_ID:
-    st.error("Set NOTION_TOKEN and NOTION_PAGE_ID in environment variables or Streamlit secrets.")
-    st.stop()
+HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Content-Type": "application/json",
+    "Notion-Version": "2022-06-28"
+}
 
-notion = Client(auth=NOTION_TOKEN)
-
-# ---- FETCH INLINE DATABASE ----
-def fetch_inline_database(page_id):
-    posts = []
-
-    # Correct call for current SDK
-    try:
-        blocks = notion.blocks.children.list(block_id=page_id)
-    except Exception as e:
-        st.error(f"Error fetching page blocks: {e}")
-        return pd.DataFrame()
-
-    # Find first inline database
-    db_id = None
-    for block in blocks.get("results", []):
+# Function to find the first inline database in the page
+def get_inline_database_id(page_id):
+    url = f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=50"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code != 200:
+        st.error(f"❌ Failed to fetch page blocks: {response.status_code} {response.text}")
+        return None
+    blocks = response.json().get("results", [])
+    for block in blocks:
         if block.get("type") == "child_database":
-            db_id = block["id"]
-            break
+            return block["id"]
+    st.info("No inline database found on this page.")
+    return None
 
-    if not db_id:
-        st.info("No inline database found on this page.")
-        return pd.DataFrame()
+# Function to add a post to the database
+def add_post(data, database_id):
+    url = "https://api.notion.com/v1/pages"
+    payload = {
+        "parent": {"database_id": database_id},
+        "properties": {
+            "Post title": {"title": [{"text": {"content": data["title"]}}]},
+            "Platform": {"select": {"name": data["platform"]}},
+            "Post type": {"select": {"name": data["post_type"]}},
+            "Content": {"select": {"name": data["content"]}},
+            "Date": {"date": {"start": data["date"]}},
+            "Reach": {"number": data["reach"]},
+            "Impressions": {"number": data["impressions"]},
+            "Likes": {"number": data["likes"]},
+            "Comments": {"number": data["comments"]},
+            "Shares": {"number": data["shares"]},
+            "Saves": {"number": data["saves"]},
+            "Repost": {"number": data["repost"]}
+        }
+    }
+    response = requests.post(url, headers=HEADERS, json=payload)
+    if response.status_code not in [200, 201]:
+        st.error(f"❌ Error {response.status_code}: {response.text}")
+        return False
+    return True
 
-    # Query database
-    try:
-        rows = notion.databases.query(database_id=db_id)
-    except Exception as e:
-        st.error(f"Error querying database: {e}")
-        return pd.DataFrame()
+# --- Page UI ---
+st.set_page_config(page_title="📊 Post Analytics", layout="centered")
+st.title("📈 Log Social Media Post Analytics")
 
-    for page in rows.get("results", []):
-        props = page.get("properties", {})
-        posts.append({
-            "Post title": props.get("Post title", {}).get("title", [{}])[0].get("text", {}).get("content", ""),
-            "Platform": props.get("Platform", {}).get("select", {}).get("name", ""),
-            "Post type": props.get("Post type", {}).get("select", {}).get("name", ""),
-            "Content": props.get("Content", {}).get("select", {}).get("name", ""),
-            "Date": props.get("Date", {}).get("date", {}).get("start", ""),
-            "Reach": props.get("Reach", {}).get("number", 0),
-            "Likes": props.get("Likes", {}).get("number", 0),
-            "Comments": props.get("Comments", {}).get("number", 0),
-            "Shares": props.get("Shares", {}).get("number", 0),
-            "Saves": props.get("Saves", {}).get("number", 0),
-            "Repost": props.get("Repost", {}).get("number", 0),
-        })
+# Form default values
+default_values = {
+    "title": "",
+    "platform": "",
+    "post_type": "",
+    "content": "",
+    "date": date.today(),
+    "reach_str": "",
+    "impressions_str": "",
+    "likes_str": "",
+    "comments_str": "",
+    "shares_str": "",
+    "saves_str": "",
+    "repost_str": ""
+}
 
-    df = pd.DataFrame(posts)
-    if not df.empty:
-        df["Total Engagement"] = df["Likes"] + df["Comments"] + df["Shares"] + df["Saves"]
-        df["Engagement Rate"] = df.apply(lambda x: (x["Total Engagement"]/x["Reach"]*100) if x["Reach"] else 0, axis=1)
+# Initialize session state
+for key, val in default_values.items():
+    st.session_state.setdefault(key, val)
+st.session_state.setdefault("submitted", False)
 
-    return df
+# Clear form if just submitted
+if st.session_state.submitted:
+    for key in default_values:
+        st.session_state[key] = default_values[key]
+    st.session_state.submitted = False
+    st.success("✅ Post logged successfully!")
 
-# ---- STREAMLIT APP ----
-st.title("Post Analytics Dashboard")
+# --- Form ---
+with st.form("post_analytics_form"):
+    st.text_input("Post Title", key="title")
+    st.selectbox("Platform", ["X", "Threads", "Instagram", "LinkedIn", "Facebook", "Snapchat", "TikTok"], key="platform")
+    st.selectbox("Post Type", ["Image", "Story", "Carousel", "Text", "Video", "Reel"], key="post_type")
+    st.selectbox("Content Type", ["Job recruitment", "Webinars", "Entertainment", "Personal", "Promotion", "Data/Insights", "Announcement", "Education"], key="content")
+    date_value = st.date_input("Date", value=st.session_state.date)
+    st.text_input("Reach", key="reach_str")
+    st.text_input("Impressions", key="impressions_str")
+    st.text_input("Likes", key="likes_str")
+    st.text_input("Comments", key="comments_str")
+    st.text_input("Shares", key="shares_str")
+    st.text_input("Saves", key="saves_str")
+    st.text_input("Repost", key="repost_str")
+    submit = st.form_submit_button("Submit")
 
-df = fetch_inline_database(PAGE_ID)
+    if submit:
+        try:
+            data = {
+                "title": st.session_state.title,
+                "platform": st.session_state.platform,
+                "post_type": st.session_state.post_type,
+                "content": st.session_state.content,
+                "date": str(date_value),
+                "reach": int(st.session_state.reach_str.replace(",", "")),
+                "impressions": int(st.session_state.impressions_str.replace(",", "")),
+                "likes": int(st.session_state.likes_str.replace(",", "")),
+                "comments": int(st.session_state.comments_str.replace(",", "")),
+                "shares": int(st.session_state.shares_str.replace(",", "")),
+                "saves": int(st.session_state.saves_str.replace(",", "")),
+                "repost": int(st.session_state.repost_str.replace(",", ""))
+            }
 
-if df.empty:
-    st.info("No posts found in the inline database.")
-else:
-    st.dataframe(df)
-    st.markdown("### Summary")
-    st.write(f"Total Posts: {len(df)}")
-    st.write(f"Average Reach: {int(df['Reach'].mean())}")
-    st.write(f"Average Engagement Rate: {df['Engagement Rate'].mean():.2f}%")
+            db_id = get_inline_database_id(NOTION_PAGE_ID)
+            if db_id:
+                success = add_post(data, db_id)
+                if success:
+                    st.session_state.submitted = True
+                    st.experimental_rerun()
+        except ValueError:
+            st.error("❌ Invalid number format. Use numbers only (e.g., 5000).")
