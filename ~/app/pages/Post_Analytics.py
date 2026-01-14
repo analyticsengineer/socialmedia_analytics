@@ -17,6 +17,14 @@ HEADERS = {
     "Notion-Version": "2022-06-28"
 }
 
+# Helper function to safely convert input to int
+def to_int(value):
+    """Convert input string to integer safely. Returns 0 if empty or invalid."""
+    try:
+        return int(str(value).replace(",", "").strip())
+    except:
+        return 0
+
 # Function to find the first inline database in the page
 def get_inline_database_id(page_id):
     url = f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=50"
@@ -61,12 +69,12 @@ def add_post(data, database_id):
 st.set_page_config(page_title="📊 Post Analytics", layout="centered")
 st.title("📈 Log Social Media Post Analytics")
 
-# Form default values
+# Form default values (make sure selectboxes have valid default values)
 default_values = {
     "title": "",
-    "platform": "",
-    "post_type": "",
-    "content": "",
+    "platform": "X",
+    "post_type": "Image",
+    "content": "Job recruitment",
     "date": date.today(),
     "reach_str": "",
     "impressions_str": "",
@@ -106,27 +114,25 @@ with st.form("post_analytics_form"):
     submit = st.form_submit_button("Submit")
 
     if submit:
-        try:
-            data = {
-                "title": st.session_state.title,
-                "platform": st.session_state.platform,
-                "post_type": st.session_state.post_type,
-                "content": st.session_state.content,
-                "date": str(date_value),
-                "reach": int(st.session_state.reach_str.replace(",", "")),
-                "impressions": int(st.session_state.impressions_str.replace(",", "")),
-                "likes": int(st.session_state.likes_str.replace(",", "")),
-                "comments": int(st.session_state.comments_str.replace(",", "")),
-                "shares": int(st.session_state.shares_str.replace(",", "")),
-                "saves": int(st.session_state.saves_str.replace(",", "")),
-                "repost": int(st.session_state.repost_str.replace(",", ""))
-            }
+        # Build data dictionary safely
+        data = {
+            "title": st.session_state.title,
+            "platform": st.session_state.platform,
+            "post_type": st.session_state.post_type,
+            "content": st.session_state.content,
+            "date": str(date_value),
+            "reach": to_int(st.session_state.reach_str),
+            "impressions": to_int(st.session_state.impressions_str),
+            "likes": to_int(st.session_state.likes_str),
+            "comments": to_int(st.session_state.comments_str),
+            "shares": to_int(st.session_state.shares_str),
+            "saves": to_int(st.session_state.saves_str),
+            "repost": to_int(st.session_state.repost_str)
+        }
 
-            db_id = get_inline_database_id(NOTION_PAGE_ID)
-            if db_id:
-                success = add_post(data, db_id)
-                if success:
-                    st.session_state.submitted = True
-                    st.experimental_rerun()
-        except ValueError:
-            st.error("❌ Invalid number format. Use numbers only (e.g., 5000).")
+        db_id = get_inline_database_id(NOTION_PAGE_ID)
+        if db_id:
+            success = add_post(data, db_id)
+            if success:
+                st.session_state.submitted = True
+                st.experimental_rerun()
