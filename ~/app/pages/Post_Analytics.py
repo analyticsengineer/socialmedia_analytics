@@ -6,7 +6,7 @@ import os
 
 # ---- NOTION SETUP ----
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-PAGE_ID = os.getenv("NOTION_PAGE_ID")  # the page containing the inline database
+PAGE_ID = os.getenv("NOTION_PAGE_ID")  # page containing inline database
 
 if not NOTION_TOKEN or not PAGE_ID:
     st.error("Please set NOTION_TOKEN and NOTION_PAGE_ID in environment variables or Streamlit secrets.")
@@ -17,13 +17,12 @@ notion = Client(auth=NOTION_TOKEN)
 # ---- FETCH INLINE DATABASE ----
 def fetch_inline_database(page_id):
     posts = []
-    # Get child blocks of the page
-    blocks = notion.blocks.children.list(page_id=page_id)
-    # Find the first inline database block
+
+    # Use the correct method in latest SDK
+    blocks = notion.blocks.children.list(block_id=page_id)  # block_id instead of page_id
     for block in blocks["results"]:
         if block["type"] == "child_database":
             db_id = block["id"]
-            # Query the database
             rows = notion.databases.query(database_id=db_id)
             for page in rows.get("results", []):
                 props = page["properties"]
@@ -41,10 +40,12 @@ def fetch_inline_database(page_id):
                     "Repost": props.get("Repost", {}).get("number", 0),
                 })
             break  # only first inline database
+
     df = pd.DataFrame(posts)
     if not df.empty:
         df["Total Engagement"] = df["Likes"] + df["Comments"] + df["Shares"] + df["Saves"]
         df["Engagement Rate"] = df.apply(lambda x: (x["Total Engagement"]/x["Reach"]*100) if x["Reach"] else 0, axis=1)
+
     return df
 
 # ---- STREAMLIT APP ----
