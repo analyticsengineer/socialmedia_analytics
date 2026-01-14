@@ -6,28 +6,41 @@ import os
 
 # ---- NOTION SETUP ----
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("DATABASE_ID")
+PAGE_ID = os.getenv("NOTION_PAGE_ID")  # the page containing the inline database
+
+if not NOTION_TOKEN or not PAGE_ID:
+    st.error("Please set NOTION_TOKEN and NOTION_PAGE_ID in environment variables or Streamlit secrets.")
+    st.stop()
 
 notion = Client(auth=NOTION_TOKEN)
 
-# ---- FETCH POSTS ----
-def fetch_posts():
-    results = notion.databases.query(database_id=DATABASE_ID)
+# ---- FETCH INLINE DATABASE ----
+def fetch_inline_database(page_id):
     posts = []
-    for page in results["results"]:
-        props = page["properties"]
-        posts.append({
-            "Post title": props["Post title"]["title"][0]["text"]["content"] if props["Post title"]["title"] else "",
-            "Platform": props["Platform"]["select"]["name"] if props["Platform"]["select"] else "",
-            "Post type": props["Post type"]["select"]["name"] if props["Post type"]["select"] else "",
-            "Content": props["Content"]["select"]["name"] if props["Content"]["select"] else "",
-            "Date": props["Date"]["date"]["start"] if props["Date"]["date"] else "",
-            "Reach": props["Reach"]["number"] if props["Reach"]["number"] else 0,
-            "Likes": props["Likes"]["number"] if props["Likes"]["number"] else 0,
-            "Comments": props["Comments"]["number"] if props["Comments"]["number"] else 0,
-            "Shares": props["Shares"]["number"] if props["Shares"]["number"] else 0,
-            "Saves": props["Saves"]["number"] if props["Saves"]["number"] else 0,
-        })
+    # Get child blocks of the page
+    blocks = notion.blocks.children.list(page_id=page_id)
+    # Find the first inline database block
+    for block in blocks["results"]:
+        if block["type"] == "child_database":
+            db_id = block["id"]
+            # Query the database
+            rows = notion.databases.query(database_id=db_id)
+            for page in rows.get("results", []):
+                props = page["properties"]
+                posts.append({
+                    "Post title": props.get("Post title", {}).get("title", [{}])[0].get("text", {}).get("content", ""),
+                    "Platform": props.get("Platform", {}).get("select", {}).get("name", ""),
+                    "Post type": props.get("Post type", {}).get("select", {}).get("name", ""),
+                    "Content": props.get("Content", {}).get("select", {}).get("name", ""),
+                    "Date": props.get("Date", {}).get("date", {}).get("start", ""),
+                    "Reach": props.get("Reach", {}).get("number", 0),
+                    "Likes": props.get("Likes", {}).get("number", 0),
+                    "Comments": props.get("Comments", {}).get("number", 0),
+                    "Shares": props.get("Shares", {}).get("number", 0),
+                    "Saves": props.get("Saves", {}).get("number", 0),
+                    "Repost": props.get("Repost", {}).get("number", 0),
+                })
+            break  # only first inline database
     df = pd.DataFrame(posts)
     if not df.empty:
         df["Total Engagement"] = df["Likes"] + df["Comments"] + df["Shares"] + df["Saves"]
@@ -36,11 +49,14 @@ def fetch_posts():
 
 # ---- STREAMLIT APP ----
 st.title("Post Analytics Dashboard")
-df = fetch_posts()
 
-st.dataframe(df)
+df = fetch_inline_database(PAGE_ID)
 
-st.markdown("### Summary")
-st.write(f"Total Posts: {len(df)}")
-st.write(f"Average Reach: {int(df['Reach'].mean())}")
-st.write(f"Average Engagement Rate: {df['Engagement Rate'].mean():.2f}%")
+if df.empty:
+    st.info("No posts found in the inline database.")
+else:
+    st.dataframe(df)
+    st.markdown("### Summary")
+    st.write(f"Total Posts: {len(df)}")
+    st.write(f"Average Reach: {int(df['Reach'].mean())}")
+    st.write(f"Average Engagement Rate: {df['Engagement Rate'].mean():.2f}%")
